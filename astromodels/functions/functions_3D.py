@@ -1,95 +1,97 @@
 from __future__ import division
 
 import hashlib
-
+from astropy import wcs
 import astropy.units as u
 import numpy as np
-from astropy.coordinates import ICRS, BaseCoordinateFrame, SkyCoord
+from astropy.coordinates import ICRS, BaseCoordinateFrame, SkyCoord, Angle
 from astropy.io import fits
 from past.utils import old_div
 from scipy.interpolate import RegularGridInterpolator
-
+import scipy
 from astromodels.functions.function import Function3D, FunctionMeta
 from astromodels.utils.angular_distance import angular_distance_fast
+from astropy.coordinates.angle_utilities import angular_separation, position_angle
+from astromodels.utils.angular_distance import angular_distance
 
 
 class Continuous_injection_diffusion_ellipse(Function3D, metaclass=FunctionMeta):
     r"""
-    description :
+        description :
 
-        Positron and electrons diffusing away from the accelerator
+            Positron and electrons diffusing away from the accelerator
 
-    latex : $\left(\frac{180^\circ}{\pi}\right)^2 \frac{1.2154}{\sqrt{\pi^3} r_{\rm diff} ({\rm angsep} ({\rm x, y, lon_0, lat_0})+0.06 r_{\rm diff} )} \, {\rm exp}\left(-\frac{{\rm angsep}^2 ({\rm x, y, lon_0, lat_0})}{r_{\rm diff} ^2} \right)$
+        latex : $\left(\frac{180^\circ}{\pi}\right)^2 \frac{1.2154}{\sqrt{\pi^3} r_{\rm diff} ({\rm angsep} ({\rm x, y, lon_0, lat_0})+0.06 r_{\rm diff} )} \, {\rm exp}\left(-\frac{{\rm angsep}^2 ({\rm x, y, lon_0, lat_0})}{r_{\rm diff} ^2} \right)$
 
-    parameters :
+        parameters :
 
-        lon0 :
+            lon0 :
 
-            desc : Longitude of the center of the source
-            initial value : 0.0
-            min : 0.0
-            max : 360.0
+                desc : Longitude of the center of the source
+                initial value : 0.0
+                min : 0.0
+                max : 360.0
 
-        lat0 :
+            lat0 :
 
-            desc : Latitude of the center of the source
-            initial value : 0.0
-            min : -90.0
-            max : 90.0
+                desc : Latitude of the center of the source
+                initial value : 0.0
+                min : -90.0
+                max : 90.0
 
-        rdiff0 :
+            rdiff0 :
 
-            desc : Projected diffusion radius. The maximum allowed value is used to define the truncation radius.
-            initial value : 1.0
-            min : 0
-            max : 20
+                desc : Projected diffusion radius. The maximum allowed value is used to define the truncation radius.
+                initial value : 1.0
+                min : 0
+                max : 20
 
-        delta :
+            delta :
 
-            desc : index for the diffusion coefficient
-            initial value : 0.5
-            min : 0.3
-            max : 0.6
-            fix : yes
+                desc : index for the diffusion coefficient
+                initial value : 0.5
+                min : 0.3
+                max : 0.6
+                fix : yes
 
-        b :
+            b :
 
-            desc : b field strength in uG
-            initial value : 3
-            min : 1
-            max : 10.
-            fix : yes
+                desc : b field strength in uG
+                initial value : 3
+                min : 1
+                max : 10.
+                fix : yes
 
-        piv :
+            piv :
 
-            desc : Pivot for the diffusion radius
-            initial value : 2e10
-            min : 0
-            fix : yes
+                desc : Pivot for the diffusion radius
+                initial value : 2e10
+                min : 0
+                fix : yes
 
-        piv2 :
+            piv2 :
 
-            desc : Pivot for converting gamma energy to electron energy (always be 1 TeV)
-            initial value : 1e9
-            min : 0
-            fix : yes
+                desc : Pivot for converting gamma energy to electron energy (always be 1 TeV)
+                initial value : 1e9
+                min : 0
+                fix : yes
 
-        incl :
+            incl :
 
-            desc : inclination of semimajoraxis to a line of constant latitude
-            initial value : 0.0
-            min : -90.0
-            max : 90.0
-            fix : yes
+                desc : inclination of semimajoraxis to a line of constant latitude
+                initial value : 0.0
+                min : -90.0
+                max : 90.0
+                fix : yes
 
-        elongation :
+            elongation :
 
-            desc : elongation of the ellipse (b/a)
-            initial value : 1.
-            min : 0.1
-            max : 10.
+                desc : elongation of the ellipse (b/a)
+                initial value : 1.
+                min : 0.1
+                max : 10.
 
-    """
+        """
 
     def _set_units(self, x_unit, y_unit, z_unit, w_unit):
 
@@ -113,9 +115,7 @@ class Continuous_injection_diffusion_ellipse(Function3D, metaclass=FunctionMeta)
         self.piv.unit = z_unit
         self.piv2.unit = z_unit
 
-    def evaluate(
-        self, x, y, z, lon0, lat0, rdiff0, delta, b, piv, piv2, incl, elongation
-    ):
+    def evaluate(self, x, y, z, lon0, lat0, rdiff0, delta, b, piv, piv2, incl, elongation):
 
         lon, lat = x, y
         energy = z
@@ -124,31 +124,19 @@ class Continuous_injection_diffusion_ellipse(Function3D, metaclass=FunctionMeta)
         # NOTE: the use of piv2 is necessary to preserve dimensional correctness: the logarithm can only be taken
         # of a dimensionless quantity, so there must be a pivot there.
 
-        e_energy_piv2 = 17.0 * np.power(
-            old_div(energy, piv2),
-            0.54 + 0.046 * np.log10(old_div(energy, piv2)),
-        )
-        e_piv_piv2 = 17.0 * np.power(
-            old_div(piv, piv2), 0.54 + 0.046 * np.log10(old_div(piv, piv2))
-        )
+        e_energy_piv2 = 17. * \
+            np.power(old_div(energy, piv2), 0.54 + 0.046 *
+                     np.log10(old_div(energy, piv2)))
+        e_piv_piv2 = 17. * \
+            np.power(old_div(piv, piv2), 0.54 + 0.046 *
+                     np.log10(old_div(piv, piv2)))
 
         try:
 
-            rdiff_a = (
-                rdiff0
-                * np.power(
-                    old_div(e_energy_piv2, e_piv_piv2),
-                    old_div((delta - 1.0), 2.0),
-                )
-                * np.sqrt(
-                    b * b / 8.0 / np.pi * 0.624
-                    + 0.26 * np.power(1.0 + 0.0107 * e_piv_piv2, -1.5)
-                )
-                / np.sqrt(
-                    b * b / 8.0 / np.pi * 0.624
-                    + 0.26 * np.power(1.0 + 0.0107 * e_energy_piv2, -1.5)
-                )
-            )
+            rdiff_a = rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), old_div((delta - 1.), 2.)) * \
+                np.sqrt(b * b / 8. / np.pi * 0.624 + 0.26 * np.power(1. + 0.0107 * e_piv_piv2, -1.5)) / \
+                np.sqrt(b * b / 8. / np.pi * 0.624 + 0.26 *
+                        np.power(1. + 0.0107 * e_energy_piv2, -1.5))
 
         except ValueError:
 
@@ -157,56 +145,28 @@ class Continuous_injection_diffusion_ellipse(Function3D, metaclass=FunctionMeta)
 
             # Work around the problem with this loop, which is slow but using units is only for testing purposes or
             # single calls, so it shouldn't matter too much
-            rdiff_a = (
-                np.array(
-                    [
-                        (rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), x)).value
-                        for x in (delta - 1.0)
-                        / 2.0
-                        * np.sqrt(
-                            b * b / 8.0 / np.pi * 0.624
-                            + 0.26 * np.power(1.0 + 0.0107 * e_piv_piv2, -1.5)
-                        )
-                        / np.sqrt(
-                            b * b / 8.0 / np.pi * 0.624
-                            + 0.26 * np.power(1.0 + 0.0107 * e_energy_piv2, -1.5)
-                        )
-                    ]
-                )
-                * rdiff0.unit
-            )
+            rdiff_a = np.array([(rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), x)).value for x in (delta - 1.) / 2. * np.sqrt(b * b / 8. / np.pi * 0.624 + 0.26 * np.power(1. + 0.0107 * e_piv_piv2, -1.5)) /
+                                np.sqrt(b * b / 8. / np.pi * 0.624 + 0.26 * np.power(1. + 0.0107 * e_energy_piv2, -1.5))]) * rdiff0.unit
 
         rdiff_b = rdiff_a * elongation
 
         pi = np.pi
 
         angsep = angular_distance_fast(lon, lat, lon0, lat0)
-        ang = np.arctan2(lat - lat0, (lon - lon0) * np.cos(lat0 * np.pi / 180.0))
+        ang = np.arctan2(lat - lat0, (lon - lon0) *
+                         np.cos(lat0 * np.pi / 180.))
 
-        theta = np.arctan2(
-            old_div(np.sin(ang - incl * np.pi / 180.0), elongation),
-            np.cos(ang - incl * np.pi / 180.0),
-        )
+        theta = np.arctan2(old_div(np.sin(ang-incl*np.pi/180.),
+                                   elongation), np.cos(ang-incl*np.pi/180.))
 
         rdiffs_a, thetas = np.meshgrid(rdiff_a, theta)
         rdiffs_b, angseps = np.meshgrid(rdiff_b, angsep)
 
-        rdiffs = np.sqrt(
-            rdiffs_a**2 * np.cos(thetas) ** 2 + rdiffs_b**2 * np.sin(thetas) ** 2
-        )
+        rdiffs = np.sqrt(rdiffs_a ** 2 * np.cos(thetas) **
+                         2 + rdiffs_b ** 2 * np.sin(thetas) ** 2)
 
-        results = (
-            np.power(old_div(180.0, pi), 2)
-            * 1.22
-            / (
-                pi
-                * np.sqrt(pi)
-                * rdiffs_a
-                * np.sqrt(elongation)
-                * (angseps + 0.06 * rdiffs)
-            )
-            * np.exp(old_div(-np.power(angseps, 2), rdiffs**2))
-        )
+        results = np.power(old_div(180.0, pi), 2) * 1.22 / (pi * np.sqrt(pi) * rdiffs_a * np.sqrt(
+            elongation) * (angseps + 0.06 * rdiffs)) * np.exp(old_div(-np.power(angseps, 2), rdiffs ** 2))
 
         return results
 
@@ -216,35 +176,30 @@ class Continuous_injection_diffusion_ellipse(Function3D, metaclass=FunctionMeta)
 
         maximum_rdiff = self.rdiff0.max_value
 
-        min_latitude = max(-90.0, self.lat0.value - maximum_rdiff)
-        max_latitude = min(90.0, self.lat0.value + maximum_rdiff)
+        min_latitude = max(-90., self.lat0.value - maximum_rdiff)
+        max_latitude = min(90., self.lat0.value + maximum_rdiff)
 
         max_abs_lat = max(np.absolute(min_latitude), np.absolute(max_latitude))
 
-        if (
-            max_abs_lat > 89.0
-            or old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)) >= 180.0
-        ):
+        if max_abs_lat > 89. or old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.)) >= 180.:
 
-            min_longitude = 0.0
-            max_longitude = 360.0
+            min_longitude = 0.
+            max_longitude = 360.
 
         else:
 
-            min_longitude = self.lon0.value - old_div(
-                maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)
-            )
-            max_longitude = self.lon0.value + old_div(
-                maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)
-            )
+            min_longitude = self.lon0.value - \
+                old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.))
+            max_longitude = self.lon0.value + \
+                old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.))
 
-            if min_longitude < 0.0:
+            if min_longitude < 0.:
 
-                min_longitude += 360.0
+                min_longitude += 360.
 
-            elif max_longitude > 360.0:
+            elif max_longitude > 360.:
 
-                max_longitude -= 360.0
+                max_longitude -= 360.
 
         return (min_longitude, max_longitude), (min_latitude, max_latitude)
 
@@ -263,73 +218,73 @@ class Continuous_injection_diffusion_ellipse(Function3D, metaclass=FunctionMeta)
 
 class Continuous_injection_diffusion(Function3D, metaclass=FunctionMeta):
     r"""
-    description :
+        description :
 
-        Positron and electrons diffusing away from the accelerator
+            Positron and electrons diffusing away from the accelerator
 
-    latex : $\left(\frac{180^\circ}{\pi}\right)^2 \frac{1.2154}{\sqrt{\pi^3} r_{\rm diff} ({\rm angsep} ({\rm x, y, lon_0, lat_0})+0.06 r_{\rm diff} )} \, {\rm exp}\left(-\frac{{\rm angsep}^2 ({\rm x, y, lon_0, lat_0})}{r_{\rm diff} ^2} \right)$
+        latex : $\left(\frac{180^\circ}{\pi}\right)^2 \frac{1.2154}{\sqrt{\pi^3} r_{\rm diff} ({\rm angsep} ({\rm x, y, lon_0, lat_0})+0.06 r_{\rm diff} )} \, {\rm exp}\left(-\frac{{\rm angsep}^2 ({\rm x, y, lon_0, lat_0})}{r_{\rm diff} ^2} \right)$
 
-    parameters :
+        parameters :
 
-        lon0 :
+            lon0 :
 
-            desc : Longitude of the center of the source
-            initial value : 0.0
-            min : 0.0
-            max : 360.0
+                desc : Longitude of the center of the source
+                initial value : 0.0
+                min : 0.0
+                max : 360.0
 
-        lat0 :
+            lat0 :
 
-            desc : Latitude of the center of the source
-            initial value : 0.0
-            min : -90.0
-            max : 90.0
+                desc : Latitude of the center of the source
+                initial value : 0.0
+                min : -90.0
+                max : 90.0
 
-        rdiff0 :
+            rdiff0 :
 
-            desc : Projected diffusion radius limited by the cooling time. The maximum allowed value is used to define the truncation radius.
-            initial value : 1.0
-            min : 0
-            max : 20
+                desc : Projected diffusion radius limited by the cooling time. The maximum allowed value is used to define the truncation radius.
+                initial value : 1.0
+                min : 0
+                max : 20
 
-        rinj :
+            rinj :
 
-            desc : Ratio of diffusion radius limited by the injection time over rdiff0. The maximum allowed value is used to define the truncation radius.
-            initial value : 100.0
-            min : 0
-            max : 200
-            fix : yes
+                desc : Ratio of diffusion radius limited by the injection time over rdiff0. The maximum allowed value is used to define the truncation radius.
+                initial value : 100.0
+                min : 0
+                max : 200
+                fix : yes
 
-        delta :
+            delta :
 
-            desc : index for the diffusion coefficient
-            initial value : 0.5
-            min : 0.3
-            max : 0.6
-            fix : yes
+                desc : index for the diffusion coefficient
+                initial value : 0.5
+                min : 0.3
+                max : 0.6
+                fix : yes
 
-        b :
+            b :
 
-            desc : b field strength in uG
-            initial value : 3
-            min : 1
-            max : 10.
-            fix : yes
+                desc : b field strength in uG
+                initial value : 3
+                min : 1
+                max : 10.
+                fix : yes
 
-        piv :
+            piv :
 
-            desc : Pivot for the diffusion radius
-            initial value : 2e10
-            min : 0
-            fix : yes
+                desc : Pivot for the diffusion radius
+                initial value : 2e10
+                min : 0
+                fix : yes
 
-        piv2 :
-            desc : Pivot for converting gamma energy to electron energy (always be 1 TeV)
-            initial value : 1e9
-            min : 0
-            fix : yes
+            piv2 :
+                desc : Pivot for converting gamma energy to electron energy (always be 1 TeV)
+                initial value : 1e9
+                min : 0
+                fix : yes
 
-    """
+        """
 
     def _set_units(self, x_unit, y_unit, z_unit, w_unit):
 
@@ -361,32 +316,20 @@ class Continuous_injection_diffusion(Function3D, metaclass=FunctionMeta):
         # NOTE: the use of piv2 is necessary to preserve dimensional correctness: the logarithm can only be taken
         # of a dimensionless quantity, so there must be a pivot there.
 
-        e_energy_piv2 = 17.0 * np.power(
-            old_div(energy, piv2),
-            0.54 + 0.046 * np.log10(old_div(energy, piv2)),
-        )
-        e_piv_piv2 = 17.0 * np.power(
-            old_div(piv, piv2), 0.54 + 0.046 * np.log10(old_div(piv, piv2))
-        )
+        e_energy_piv2 = 17. * \
+            np.power(old_div(energy, piv2), 0.54 + 0.046 *
+                     np.log10(old_div(energy, piv2)))
+        e_piv_piv2 = 17. * \
+            np.power(old_div(piv, piv2), 0.54 + 0.046 *
+                     np.log10(old_div(piv, piv2)))
 
-        rdiff_c = (
-            rdiff0
-            * np.power(old_div(e_energy_piv2, e_piv_piv2), old_div((delta - 1.0), 2.0))
-            * np.sqrt(
-                b * b / 8.0 / np.pi * 0.624
-                + 0.26 * np.power(1.0 + 0.0107 * e_piv_piv2, -1.5)
-            )
-            / np.sqrt(
-                b * b / 8.0 / np.pi * 0.624
-                + 0.26 * np.power(1.0 + 0.0107 * e_energy_piv2, -1.5)
-            )
-        )
+        rdiff_c = rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), old_div((delta - 1.), 2.)) * \
+            np.sqrt(b * b / 8. / np.pi * 0.624 + 0.26 * np.power(1. + 0.0107 * e_piv_piv2, -1.5)) / \
+            np.sqrt(b * b / 8. / np.pi * 0.624 + 0.26 *
+                    np.power(1. + 0.0107 * e_energy_piv2, -1.5))
 
-        rdiff_i = (
-            rdiff0
-            * rinj
-            * np.power(old_div(e_energy_piv2, e_piv_piv2), old_div(delta, 2.0))
-        )
+        rdiff_i = rdiff0 * rinj * \
+            np.power(old_div(e_energy_piv2, e_piv_piv2), old_div(delta, 2.))
 
         rdiff = np.minimum(rdiff_c, rdiff_i)
 
@@ -396,12 +339,8 @@ class Continuous_injection_diffusion(Function3D, metaclass=FunctionMeta):
 
         rdiffs, angseps = np.meshgrid(rdiff, angsep)
 
-        return (
-            np.power(old_div(180.0, pi), 2)
-            * 1.2154
-            / (pi * np.sqrt(pi) * rdiffs * (angseps + 0.06 * rdiffs))
-            * np.exp(old_div(-np.power(angseps, 2), rdiffs**2))
-        )
+        return np.power(old_div(180.0, pi), 2) * 1.2154 / (pi * np.sqrt(pi) * rdiffs * (angseps + 0.06 * rdiffs)) * \
+            np.exp(old_div(-np.power(angseps, 2), rdiffs ** 2))
 
     def get_boundaries(self):
 
@@ -409,35 +348,30 @@ class Continuous_injection_diffusion(Function3D, metaclass=FunctionMeta):
 
         maximum_rdiff = self.rdiff0.max_value
 
-        min_latitude = max(-90.0, self.lat0.value - maximum_rdiff)
-        max_latitude = min(90.0, self.lat0.value + maximum_rdiff)
+        min_latitude = max(-90., self.lat0.value - maximum_rdiff)
+        max_latitude = min(90., self.lat0.value + maximum_rdiff)
 
         max_abs_lat = max(np.absolute(min_latitude), np.absolute(max_latitude))
 
-        if (
-            max_abs_lat > 89.0
-            or old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)) >= 180.0
-        ):
+        if max_abs_lat > 89. or old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.)) >= 180.:
 
-            min_longitude = 0.0
-            max_longitude = 360.0
+            min_longitude = 0.
+            max_longitude = 360.
 
         else:
 
-            min_longitude = self.lon0.value - old_div(
-                maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)
-            )
-            max_longitude = self.lon0.value + old_div(
-                maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)
-            )
+            min_longitude = self.lon0.value - \
+                old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.))
+            max_longitude = self.lon0.value + \
+                old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.))
 
-            if min_longitude < 0.0:
+            if min_longitude < 0.:
 
-                min_longitude += 360.0
+                min_longitude += 360.
 
-            elif max_longitude > 360.0:
+            elif max_longitude > 360.:
 
-                max_longitude -= 360.0
+                max_longitude -= 360.
 
         return (min_longitude, max_longitude), (min_latitude, max_latitude)
 
@@ -456,65 +390,65 @@ class Continuous_injection_diffusion(Function3D, metaclass=FunctionMeta):
 
 class Continuous_injection_diffusion_legacy(Function3D, metaclass=FunctionMeta):
     r"""
-    description :
+        description :
 
-        Positron and electrons diffusing away from the accelerator
+            Positron and electrons diffusing away from the accelerator
 
-    latex : $\left(\frac{180^\circ}{\pi}\right)^2 \frac{1.2154}{\sqrt{\pi^3} r_{\rm diff} ({\rm angsep} ({\rm x, y, lon_0, lat_0})+0.06 r_{\rm diff} )} \, {\rm exp}\left(-\frac{{\rm angsep}^2 ({\rm x, y, lon_0, lat_0})}{r_{\rm diff} ^2} \right)$
+        latex : $\left(\frac{180^\circ}{\pi}\right)^2 \frac{1.2154}{\sqrt{\pi^3} r_{\rm diff} ({\rm angsep} ({\rm x, y, lon_0, lat_0})+0.06 r_{\rm diff} )} \, {\rm exp}\left(-\frac{{\rm angsep}^2 ({\rm x, y, lon_0, lat_0})}{r_{\rm diff} ^2} \right)$
 
-    parameters :
+        parameters :
 
-        lon0 :
+            lon0 :
 
-            desc : Longitude of the center of the source
-            initial value : 0.0
-            min : 0.0
-            max : 360.0
+                desc : Longitude of the center of the source
+                initial value : 0.0
+                min : 0.0
+                max : 360.0
 
-        lat0 :
+            lat0 :
 
-            desc : Latitude of the center of the source
-            initial value : 0.0
-            min : -90.0
-            max : 90.0
+                desc : Latitude of the center of the source
+                initial value : 0.0
+                min : -90.0
+                max : 90.0
 
-        rdiff0 :
+            rdiff0 :
 
-            desc : Projected diffusion radius. The maximum allowed value is used to define the truncation radius.
-            initial value : 1.0
-            min : 0
-            max : 20
+                desc : Projected diffusion radius. The maximum allowed value is used to define the truncation radius.
+                initial value : 1.0
+                min : 0
+                max : 20
 
-        delta :
+            delta :
 
-            desc : index for the diffusion coefficient
-            initial value : 0.5
-            min : 0.3
-            max : 0.6
-            fix : yes
+                desc : index for the diffusion coefficient
+                initial value : 0.5
+                min : 0.3
+                max : 0.6
+                fix : yes
 
-        uratio :
+            uratio :
 
-            desc : ratio between u_cmb and u_B
-            initial value : 0.5
-            min : 0.01
-            max : 100.
-            fix : yes
+                desc : ratio between u_cmb and u_B
+                initial value : 0.5
+                min : 0.01
+                max : 100.
+                fix : yes
 
-        piv :
+            piv :
 
-            desc : Pivot for the diffusion radius
-            initial value : 2e10
-            min : 0
-            fix : yes
+                desc : Pivot for the diffusion radius
+                initial value : 2e10
+                min : 0
+                fix : yes
 
-        piv2 :
-            desc : Pivot for converting gamma energy to electron energy (always be 1 TeV)
-            initial value : 1e9
-            min : 0
-            fix : yes
+            piv2 :
+                desc : Pivot for converting gamma energy to electron energy (always be 1 TeV)
+                initial value : 1e9
+                min : 0
+                fix : yes
 
-    """
+        """
 
     def _set_units(self, x_unit, y_unit, z_unit, w_unit):
 
@@ -545,25 +479,19 @@ class Continuous_injection_diffusion_legacy(Function3D, metaclass=FunctionMeta):
         # NOTE: the use of piv2 is necessary to preserve dimensional correctness: the logarithm can only be taken
         # of a dimensionless quantity, so there must be a pivot there.
 
-        e_energy_piv2 = 17.0 * np.power(
-            old_div(energy, piv2),
-            0.54 + 0.046 * np.log10(old_div(energy, piv2)),
-        )
-        e_piv_piv2 = 17.0 * np.power(
-            old_div(piv, piv2), 0.54 + 0.046 * np.log10(old_div(piv, piv2))
-        )
+        e_energy_piv2 = 17. * \
+            np.power(old_div(energy, piv2), 0.54 + 0.046 *
+                     np.log10(old_div(energy, piv2)))
+        e_piv_piv2 = 17. * \
+            np.power(old_div(piv, piv2), 0.54 + 0.046 *
+                     np.log10(old_div(piv, piv2)))
 
         try:
 
-            rdiff = (
-                rdiff0
-                * np.power(
-                    old_div(e_energy_piv2, e_piv_piv2),
-                    old_div((delta - 1.0), 2.0),
-                )
-                * np.sqrt(1.0 + uratio * np.power(1.0 + 0.0107 * e_piv_piv2, -1.5))
-                / np.sqrt(1.0 + uratio * np.power(1.0 + 0.0107 * e_energy_piv2, -1.5))
-            )
+            rdiff = rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), old_div((delta - 1.), 2.)) * \
+                np.sqrt(1. + uratio * np.power(1. + 0.0107 * e_piv_piv2, -1.5)) / \
+                np.sqrt(1. + uratio * np.power(1. +
+                                               0.0107 * e_energy_piv2, -1.5))
 
         except ValueError:
 
@@ -572,22 +500,8 @@ class Continuous_injection_diffusion_legacy(Function3D, metaclass=FunctionMeta):
 
             # Work around the problem with this loop, which is slow but using units is only for testing purposes or
             # single calls, so it shouldn't matter too much
-            rdiff = (
-                np.array(
-                    [
-                        (rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), x)).value
-                        for x in (delta - 1.0)
-                        / 2.0
-                        * np.sqrt(
-                            1.0 + uratio * np.power(1.0 + 0.0107 * e_piv_piv2, -1.5)
-                        )
-                        / np.sqrt(
-                            1.0 + uratio * np.power(1.0 + 0.0107 * e_energy_piv2, -1.5)
-                        )
-                    ]
-                )
-                * rdiff0.unit
-            )
+            rdiff = np.array([(rdiff0 * np.power(old_div(e_energy_piv2, e_piv_piv2), x)).value for x in (delta - 1.) / 2. * np.sqrt(1. + uratio * np.power(1. + 0.0107 * e_piv_piv2, -1.5)) /
+                              np.sqrt(1. + uratio * np.power(1. + 0.0107 * e_energy_piv2, -1.5))]) * rdiff0.unit
 
         angsep = angular_distance_fast(lon, lat, lon0, lat0)
 
@@ -595,12 +509,8 @@ class Continuous_injection_diffusion_legacy(Function3D, metaclass=FunctionMeta):
 
         rdiffs, angseps = np.meshgrid(rdiff, angsep)
 
-        return (
-            np.power(old_div(180.0, pi), 2)
-            * 1.2154
-            / (pi * np.sqrt(pi) * rdiffs * (angseps + 0.06 * rdiffs))
-            * np.exp(old_div(-np.power(angseps, 2), rdiffs**2))
-        )
+        return np.power(old_div(180.0, pi), 2) * 1.2154 / (pi * np.sqrt(pi) * rdiffs * (angseps + 0.06 * rdiffs)) * \
+            np.exp(old_div(-np.power(angseps, 2), rdiffs ** 2))
 
     def get_boundaries(self):
 
@@ -608,35 +518,30 @@ class Continuous_injection_diffusion_legacy(Function3D, metaclass=FunctionMeta):
 
         maximum_rdiff = self.rdiff0.max_value
 
-        min_latitude = max(-90.0, self.lat0.value - maximum_rdiff)
-        max_latitude = min(90.0, self.lat0.value + maximum_rdiff)
+        min_latitude = max(-90., self.lat0.value - maximum_rdiff)
+        max_latitude = min(90., self.lat0.value + maximum_rdiff)
 
         max_abs_lat = max(np.absolute(min_latitude), np.absolute(max_latitude))
 
-        if (
-            max_abs_lat > 89.0
-            or old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)) >= 180.0
-        ):
+        if max_abs_lat > 89. or old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.)) >= 180.:
 
-            min_longitude = 0.0
-            max_longitude = 360.0
+            min_longitude = 0.
+            max_longitude = 360.
 
         else:
 
-            min_longitude = self.lon0.value - old_div(
-                maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)
-            )
-            max_longitude = self.lon0.value + old_div(
-                maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.0)
-            )
+            min_longitude = self.lon0.value - \
+                old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.))
+            max_longitude = self.lon0.value + \
+                old_div(maximum_rdiff, np.cos(max_abs_lat * np.pi / 180.))
 
-            if min_longitude < 0.0:
+            if min_longitude < 0.:
 
-                min_longitude += 360.0
+                min_longitude += 360.
 
-            elif max_longitude > 360.0:
+            elif max_longitude > 360.:
 
-                max_longitude -= 360.0
+                max_longitude -= 360.
 
         return (min_longitude, max_longitude), (min_latitude, max_latitude)
 
@@ -655,27 +560,27 @@ class Continuous_injection_diffusion_legacy(Function3D, metaclass=FunctionMeta):
 
 class GalPropTemplate_3D(Function3D):
     r"""
-    description :
+        description :
 
-        Use a 3D template that has morphology and flux information.
-        GalProp, DRAGON or a similar model in fits format would work.
-        Only parameter is a normalization factor.
+            Use a 3D template that has morphology and flux information.
+            GalProp, DRAGON or a similar model in fits format would work. 
+            Only parameter is a normalization factor. 
 
-    latex : $ K $
+        latex : $ K $
 
-    parameters :
+        parameters :
 
-        K :
+            K :
 
-            desc : normalization
-            initial value : 1
-            fix : yes
+                desc : normalization
+                initial value : 1
+                fix : yes
 
-        hash :
+            hash :
 
-            desc : hash of model map [needed for memoization]
-            initial value : 1
-            fix : yes
+                desc : hash of model map [needed for memoization]
+                initial value : 1
+                fix : yes         
 
     """
 
@@ -706,10 +611,12 @@ class GalPropTemplate_3D(Function3D):
     def load_file(self, fitsfile, phi1, phi2, theta1, theta2, galactic=False, ihdu=0):
 
         if fitsfile is None:
-            raise RuntimeError("Need to specify a fits file with a template map.")
+            raise RuntimeError(
+                "Need to specify a fits file with a template map.")
 
         self._fitsfile = fitsfile
-        p1, p2, t1, t2 = self.define_region(phi1, phi2, theta1, theta2, galactic)
+        p1, p2, t1, t2 = self.define_region(
+            phi1, phi2, theta1, theta2, galactic)
         self.ramin = p1
         self.ramax = p2
         self.decmin = t1
@@ -717,42 +624,31 @@ class GalPropTemplate_3D(Function3D):
 
         with fits.open(self._fitsfile) as f:
 
-            self._delLon = f[ihdu].header["CDELT1"]
-            self._delLat = f[ihdu].header["CDELT2"]
-            self._delEn = f[ihdu].header["CDELT3"]
-            self._refLon = f[ihdu].header["CRVAL1"]
-            self._refLat = f[ihdu].header["CRVAL2"]
-            self._refEn = f[ihdu].header["CRVAL3"]  # values in log10
+            self._delLon = f[ihdu].header['CDELT1']
+            self._delLat = f[ihdu].header['CDELT2']
+            self._delEn = f[ihdu].header['CDELT3']
+            self._refLon = f[ihdu].header['CRVAL1']
+            self._refLat = f[ihdu].header['CRVAL2']
+            self._refEn = f[ihdu].header['CRVAL3']  # values in log10
             self._map = f[ihdu].data
-            self._nl = f[ihdu].header["NAXIS1"]  # longitude
-            self._nb = f[ihdu].header["NAXIS2"]  # latitude
-            self._ne = f[ihdu].header["NAXIS3"]  # energy
+            self._nl = f[ihdu].header['NAXIS1']  # longitude
+            self._nb = f[ihdu].header['NAXIS2']  # latitude
+            self._ne = f[ihdu].header['NAXIS3']  # energy
 
             # Create the function for the interpolation
             self._L = np.linspace(
-                self._refLon,
-                self._refLon + (self._nl - 1) * self._delLon,
-                self._nl,
-            )
+                self._refLon, self._refLon+(self._nl-1)*self._delLon, self._nl)
             self._B = np.linspace(
-                self._refLat,
-                self._refLat + (self._nb - 1) * self._delLat,
-                self._nb,
-            )
+                self._refLat, self._refLat+(self._nb-1)*self._delLat, self._nb)
             self._E = np.linspace(
-                self._refEn,
-                self._refEn + (self._ne - 1) * self._delEn,
-                self._ne,
-            )
+                self._refEn, self._refEn+(self._ne-1)*self._delEn, self._ne)
             for i in range(len(self._E)):
                 # Map units in Mev / cm^2 s sr, changing to 1 / MeV cm^2 s sr
-                self._map[i] = self._map[i] / (
-                    np.power(10, self._E[i]) * np.power(10, self._E[i])
-                )
-                self._map[i] = np.fliplr(self._map[i])
+                self._map[i] = self._map[i] / \
+                    (np.power(10, self._E[i])*np.power(10, self._E[i]))
+                self._map[i] = (np.fliplr(self._map[i]))
             self._F = RegularGridInterpolator(
-                (self._E, self._B, self._L), self._map, bounds_error=False
-            )
+                (self._E, self._B, self._L), self._map, bounds_error=False)
 
             h = hashlib.sha224()
             h.update(self._map)
@@ -764,13 +660,13 @@ class GalPropTemplate_3D(Function3D):
 
         if not minimal:
 
-            data["extra_setup"] = {
+            data['extra_setup'] = {
                 "_fitsfile": self._fitsfile,
                 "_frame": self._frame,
                 "ramin": self.ramin,
                 "ramax": self.ramax,
                 "decmin": self.decmin,
-                "decmax": self.decmax,
+                "decmax": self.decmax
             }
 
         return data
@@ -782,37 +678,33 @@ class GalPropTemplate_3D(Function3D):
 
         if self._map is None:
 
-            self.load_file(
-                self._fitsfile,
-                self.ramin,
-                self.ramax,
-                self.decmin,
-                self.decmax,
-                False,
-                ihdu=0,
-            )
+            self.load_file(self._fitsfile, self.ramin, self.ramax,
+                           self.decmin, self.decmax, False, ihdu=0)
 
         # Interpolated values can be cached since we are fitting the constant K
         if self._interpmap is None:
 
             # We assume x and y are R.A. and Dec
             _coord = SkyCoord(ra=x, dec=y, frame=self._frame, unit="deg")
-            b = _coord.transform_to("galactic").b.value
-            l = _coord.transform_to("galactic").l.value
+            b = _coord.transform_to('galactic').b.value
+            l = _coord.transform_to('galactic').l.value
             lon = l
             lat = b
+            print(x)
+            print(y)
+            print(z)
 
             # transform energy from keV to MeV. Galprop Model starts at 100 MeV
-            energy = np.log10(z) - np.log10((u.MeV.to("keV") / u.keV).value)
+            energy = np.log10(z)-np.log10((u.MeV.to('keV')/u.keV).value)
 
             if lon.size != lat.size:
                 raise AttributeError("Lon and Lat should be the same size")
             f = np.zeros([lon.size, energy.size])
             E0 = self._refEn
-            Ef = self._refEn + (self._ne - 1) * self._delEn
+            Ef = self._refEn + (self._ne-1)*self._delEn
 
             # fix longitude
-            shift = np.where(lon > 180.0)
+            shift = np.where(lon > 180.)
             lon[shift] = 180 - lon[shift]
 
             for i in range(energy.size):
@@ -829,7 +721,7 @@ class GalPropTemplate_3D(Function3D):
             self._interpmap = f
 
         # (1000 is to change from MeV to KeV)
-        A = np.multiply(K, self._interpmap / 1000.0)
+        A = np.multiply(K, self._interpmap/1000.)
         return A
 
     def define_region(self, a, b, c, d, galactic=False):
@@ -839,17 +731,13 @@ class GalPropTemplate_3D(Function3D):
             bmin = c
             bmax = d
 
-            _coord = SkyCoord(
-                l=[lmin, lmin, lmax, lmax],
-                b=[bmin, bmax, bmax, bmin],
-                frame="galactic",
-                unit="deg",
-            )
+            _coord = SkyCoord(l=[lmin, lmin, lmax, lmax], b=[
+                              bmin, bmax, bmax, bmin], frame='galactic', unit='deg')
 
-            ramin = min(_coord.transform_to("icrs").ra.value)
-            ramax = max(_coord.transform_to("icrs").ra.value)
-            decmin = min(_coord.transform_to("icrs").dec.value)
-            decmax = max(_coord.transform_to("icrs").dec.value)
+            ramin = min(_coord.transform_to('icrs').ra.value)
+            ramax = max(_coord.transform_to('icrs').ra.value)
+            decmin = min(_coord.transform_to('icrs').dec.value)
+            decmax = max(_coord.transform_to('icrs').dec.value)
 
         else:
             ramin = a
@@ -864,3 +752,171 @@ class GalPropTemplate_3D(Function3D):
         min_latitude = self.decmin
         max_latitude = self.decmax
         return (min_longitude, max_longitude), (min_latitude, max_latitude)
+
+#############Created from Hugo's Galprop Template Analysis#########
+
+class Hermes(Function3D, metaclass=FunctionMeta):
+    r"""
+        description :
+
+            Use a 3D template that has morphology and flux information created using the HERMES sky-maps in fits format. 
+            Only parameter is the normalization scale factor N. 
+
+        latex : $ N $
+
+        parameters :
+
+            N :
+
+                desc : normalization scale factor
+                initial value : 1
+                fix : yes
+
+            hash :
+
+                desc : hash of model map [needed for memoization]
+                initial value : 1
+                fix : yes
+
+            ihdu:
+                desc: header unit index of fits file
+                initial value: 0
+                fix: True
+                min: 0
+
+        properties:
+            fits_file:
+                desc: fits file to load
+                defer: True
+                function: _load_file
+            frame:
+                desc: coordinate frame
+                initial value: icrs
+                allowed values:
+                    - icrs
+                    - galactic
+                    - fk5
+                    - fk4
+                    - fk4_no_e
+    """
+
+    def _set_units(self, x_unit, y_unit, z_unit, w_unit):
+        #self.N*K.unit = (u.keV * u.cm**2 * u.s * u.sr) ** (-1)
+        # The spectrum and morphology are embedded in the template.
+        # The normalization scale factor N is for scaling the normalization of the template to fit the data.
+        self.N.unit = w_unit
+
+    def _setup(self):
+        self._frame = "icrs"
+        self._intmap = None
+
+    def set_frame(self, new_frame):
+        """
+        Set a new frame for the coordinates (the default is ICRS J2000)
+
+        :param new_frame: a coordinate frame from astropy
+        :return: (none)
+        """
+        assert isinstance(new_frame, BaseCoordinateFrame)
+
+        self._frame = new_frame
+
+    def _load_file(self):
+
+        if self.fits_file is None:
+            raise RuntimeError(
+                "Need to specify a fits file with a template map.")
+
+        self._fitsfile=self.fits_file.value
+
+        with fits.open(self._fitsfile) as f:
+
+            self._delLon = f[int(self.ihdu.value)].header['CDELT1']
+            self._delLat = f[int(self.ihdu.value)].header['CDELT2']
+            self._delEn = f[int(self.ihdu.value)].header['CDELT3']
+            self._refLon = f[int(self.ihdu.value)].header['CRVAL1']
+            self._refLat = f[int(self.ihdu.value)].header['CRVAL2']
+            self._refEn = f[int(self.ihdu.value)].header['CRVAL3']  # values in log10
+            self._map = f[int(self.ihdu.value)].data
+            self._wcs = wcs.WCS(header = f[int(self.ihdu.value)].header)
+            if len(self._map.shape) == 4:
+                self._map = self._map[0]
+            self._nl = f[int(self.ihdu.value)].header['NAXIS1']  # longitude
+            self._nb = f[int(self.ihdu.value)].header['NAXIS2']  # latitude
+            self._ne = f[int(self.ihdu.value)].header['NAXIS3']  # energy
+
+            # Create the function for the interpolation
+            self._L = np.linspace(
+                self._refLon, self._refLon-(self._nl-1)*self._delLon, self._nl)
+            self._B = np.linspace(
+                self._refLat, self._refLat+(self._nb-1)*self._delLat, self._nb)
+            self._E = np.linspace(
+                self._refEn, self._refEn+(self._ne-1)*self._delEn, self._ne)
+            for i in range(len(self._E)):
+                self._map[i] = np.fliplr(self._map[i])
+            self._F = RegularGridInterpolator(
+                (self._E, self._B, self._L), self._map, bounds_error=False)
+
+            h = hashlib.sha224()
+            h.update(self._map)
+            h.update(repr(self._wcs).encode("utf-8"))
+            self.hash = int(h.hexdigest(), 16)
+
+
+    def evaluate(self, x, y, z, N, hash, ihdu):
+
+        if self._map is None:
+            self._load_file(self._fitsfile)
+
+        if self._intmap is None:
+            _coord = SkyCoord(ra=x, dec=y, frame=self._frame, unit="deg")
+            b = _coord.transform_to('galactic').b.value
+            l = _coord.transform_to('galactic').l.value
+            lon = l
+            lat = b
+            energy = np.log10(z)
+
+            if lon.size != lat.size:
+                raise AttributeError("Lon and Lat should be the same size")
+            f = np.zeros([lon.size, energy.size])
+            E0 = self._refEn
+            Ef = self._refEn + (self._ne-1)*self._delEn
+
+            #Update for the galactic center
+            mask = (lon<6) & (lon>=0)
+            lon[mask]+=360
+
+            for i in range(energy.size):
+                e = np.repeat(energy[i], len(lon))
+                f[:, i] = self._F(np.array([e, lat, lon]).T)
+
+            bad_idx = np.isnan(f)
+            f[bad_idx] = 0
+            bad_idx = np.isinf(f)
+            f[bad_idx] = 0
+            assert np.all(np.isfinite(f)), "some interpolated values are wrong"
+            self._intmap = f
+
+        A = np.multiply(N, self._intmap)
+        return A
+
+    def get_boundaries(self):
+        # Same as SpatialTemplate_2D
+        Xcorners = np.array( [0, 0,        self._nl, self._nl] )
+        Ycorners = np.array( [0, self._nb, 0,        self._nb] )
+
+        corners = SkyCoord.from_pixel( Xcorners, Ycorners, wcs=self._wcs, origin = 0).transform_to(self._frame)
+
+        min_lon = min(corners.ra.degree)
+        max_lon = max(corners.ra.degree)
+
+        min_lat = min(corners.dec.degree)
+        max_lat = max(corners.dec.degree)
+
+        return (min_lon, max_lon), (min_lat, max_lat)
+
+
+    def get_total_spatial_integral(self, z=None):
+        if isinstance( z, u.Quantity):
+            z = z.value
+        return np.multiply(self.K.value, np.ones_like( z ))
